@@ -1,0 +1,88 @@
+========================================
+COMANDOS PARA SUBIR A GIT DESDE CURSOR
+========================================
+
+PASO 1: Verificar estado
+-------------------------
+git status
+
+(Verás que "Datos reales.xlsx" NO aparece - está en .gitignore)
+
+
+PASO 2: Añadir todos los archivos
+----------------------------------
+git add .
+
+
+PASO 3: Hacer commit
+--------------------
+git commit -m "Versión 2.0: Dashboard con corrección de horas de sol para España"
+
+
+PASO 4: Crear repositorio en GitHub
+------------------------------------
+1. Ve a: https://github.com/new
+2. Nombre: prediccion-solar-espana
+3. Descripción: Dashboard interactivo para predicción de generación solar en España con ML
+4. Público o Privado: Tu elección
+5. NO marques README, .gitignore ni LICENSE (ya los tienes)
+6. Click "Create repository"
+
+
+PASO 5: Conectar con GitHub
+----------------------------
+Reemplaza TU-USUARIO con tu nombre de usuario de GitHub:
+
+git remote add origin https://github.com/TU-USUARIO/prediccion-solar-espana.git
+
+
+PASO 6: Subir a GitHub
+-----------------------
+git push -u origin main
+
+Si da error de rama, prueba:
+git push -u origin master
+
+
+PASO 7: Verificar
+------------------
+Ve a: https://github.com/TU-USUARIO/prediccion-solar-espana
+
+Deberías ver:
+- README.md
+- dashboard_interactivo.py
+- modelo_corregido_horas_sol.py
+- Y otros archivos
+
+NO DEBERÍAS VER:
+- Datos reales.xlsx (excluido por .gitignore)
+- RESULTADOS_CORREGIDOS_SOL.xlsx (excluido por .gitignore)
+
+
+========================================
+RESUMEN RÁPIDO (copia y pega):
+========================================
+
+git add .
+git commit -m "Versión 2.0: Dashboard con corrección de horas de sol para España"
+git remote add origin https://github.com/TU-USUARIO/prediccion-solar-espana.git
+git push -u origin main
+
+
+========================================
+DESPUÉS DE SUBIR:
+========================================
+
+Borra este archivo:
+Remove-Item INSTRUCCIONES_GIT.txt
+
+Y actualiza Git:
+git add .
+git commit -m "Limpiar archivos temporales"
+git push
+
+
+========================================
+¡LISTO!
+========================================
+
