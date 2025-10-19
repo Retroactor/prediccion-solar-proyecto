@@ -1,0 +1,18 @@
+MÉTRICAS DE ENTRENAMIENTO - SOLAR PREDICTOR
+==================================================
+Fecha: 2025-10-19 18:12:08
+Datos de entrenamiento: 27992 registros
+Datos de prueba: 6999 registros
+Features utilizadas: 31
+
+MÉTRICAS:
+MAE: 1315.2747
+RMSE: 2747.7537
+R2: 0.8875
+
+PARÁMETROS DEL MODELO:
+n_estimators: 200
+max_depth: 12
+learning_rate: 0.05
+subsample: 0.9
+random_state: 42

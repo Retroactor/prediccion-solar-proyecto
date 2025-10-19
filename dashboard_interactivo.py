@@ -80,7 +80,7 @@ def cargar_datos():
 def cargar_resultados():
     """Cargar resultados del modelo"""
     try:
-        resultados = pd.read_excel('RESULTADOS_FINALES.xlsx')
+        resultados = pd.read_excel('RESULTADOS_CORREGIDOS_SOL.xlsx')
         resultados['fecha_y_hora'] = pd.to_datetime(resultados['fecha_y_hora'])
         return resultados
     except:
@@ -128,46 +128,34 @@ def preparar_features(df):
     
     return df
 
-def entrenar_modelo_simple(df):
-    """Entrenar modelo rápido para predicciones"""
-    df = preparar_features(df)
-    
-    feature_cols = [
-        'hora', 'minuto', 'dia_semana', 'mes', 'dia_año', 'es_finde', 'trimestre',
-        'hora_sin', 'hora_cos', 'dia_semana_sin', 'dia_semana_cos', 
-        'mes_sin', 'mes_cos', 'es_dia_solar', 'intensidad_solar', 'tiene_sol'
-    ]
-    
-    # Agregar features físicas si existen
-    if 'Total Promedio de Radiación inclinada Solar R1(W/m²)' in df.columns:
-        feature_cols.append('Total Promedio de Radiación inclinada Solar R1(W/m²)')
-    if 'Total Promedio de Temperatura del módulo 1(°C)' in df.columns:
-        feature_cols.append('Total Promedio de Temperatura del módulo 1(°C)')
-    
-    # Lags simples
-    for lag in [1, 6, 24]:
-        df[f'lag_{lag}'] = df['generacion'].shift(lag)
-        feature_cols.append(f'lag_{lag}')
-    
-    df_clean = df.dropna()
-    
-    X = df_clean[feature_cols].values
-    y = df_clean['generacion'].values
+@st.cache_data
+def cargar_modelo_entrenado():
+    """Cargar el modelo previamente entrenado"""
+    try:
+        with open('modelo_solar_entrenado.pkl', 'rb') as f:
+            modelo_info = pickle.load(f)
+        return modelo_info['model'], modelo_info['feature_cols'], modelo_info['scaler_info']
+    except FileNotFoundError:
+        st.error("❌ No se encontró el modelo entrenado. Ejecuta primero 'modelo_corregido_horas_sol.py'")
+        return None, None, None
+
+def crear_modelo_simple_fallback(df, feature_cols):
+    """Modelo simple de respaldo si no hay suficientes datos"""
+    X = df[feature_cols].values
+    y = df['generacion'].values
     
     model = GradientBoostingRegressor(
-        n_estimators=100,
-        max_depth=8,
+        n_estimators=50,
+        max_depth=6,
         learning_rate=0.1,
-        random_state=42,
-        verbose=0
+        random_state=42
     )
     
     model.fit(X, y)
-    
     return model, feature_cols
 
-def predecir_futuro(model, feature_cols, df, dias_adelante=7):
-    """Generar predicciones hacia el futuro"""
+def predecir_futuro(model, feature_cols, df, scaler_info, dias_adelante=7):
+    """Generar predicciones hacia el futuro con mejor lógica"""
     ultima_fecha = df['fecha_y_hora'].max()
     
     # Generar fechas futuras (cada 15 minutos)
@@ -181,19 +169,36 @@ def predecir_futuro(model, feature_cols, df, dias_adelante=7):
     df_futuro['fecha'] = df_futuro['fecha_y_hora'].dt.date
     df_futuro = preparar_features(df_futuro)
     
-    # Usar promedios históricos para lags
-    promedios_hora = df.groupby('hora')['generacion'].mean()
+    # Calcular estadísticas históricas más sofisticadas
+    df_prep = preparar_features(df.copy())
+    promedios_hora = df_prep.groupby('hora')['generacion'].mean()
+    promedios_hora_mes = df_prep.groupby(['hora', 'mes'])['generacion'].mean()
+    promedios_hora_dia = df_prep.groupby(['hora', 'dia_semana'])['generacion'].mean()
+    
+    # Calcular medias móviles históricas
+    medias_moviles_historicas = {}
+    for window in [3, 6, 12, 24]:
+        medias_moviles_historicas[window] = df_prep['generacion'].rolling(window=window).mean().mean()
     
     predicciones = []
     for idx, row in df_futuro.iterrows():
         hora = row['hora']
+        mes = row['mes']
+        dia_semana = row['dia_semana']
         
-        # Crear features
+        # Crear features con mejor lógica
         features = []
         for col in feature_cols:
             if 'lag_' in col:
-                # Usar promedio histórico
-                features.append(promedios_hora.get(hora, 0))
+                lag_num = int(col.split('_')[1])
+                # Usar promedio histórico apropiado
+                if lag_num <= 24:
+                    features.append(promedios_hora.get(hora, 0))
+                else:
+                    features.append(promedios_hora.get(hora, 0) * 0.8)  # Reducir para lags largos
+            elif 'media_movil_' in col:
+                window = int(col.split('_')[2])
+                features.append(medias_moviles_historicas.get(window, 0))
             elif col in df_futuro.columns:
                 features.append(row[col])
             else:
@@ -203,9 +208,13 @@ def predecir_futuro(model, feature_cols, df, dias_adelante=7):
         pred = max(0, pred)
         
         # CORRECCIÓN: Ajustar según horas de sol reales de España
-        mes = row['mes']
         if not hora_tiene_sol(hora, mes):
             pred = 0
+        else:
+            # Ajustar según el patrón histórico de esa hora y mes
+            factor_ajuste = promedios_hora_mes.get((hora, mes), promedios_hora.get(hora, 1))
+            if factor_ajuste > 0:
+                pred = pred * min(2.0, max(0.1, factor_ajuste / promedios_hora.get(hora, 1)))
         
         predicciones.append(pred)
     
@@ -285,11 +294,11 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                mae = np.mean(np.abs(datos_filtrados['generacion'] - datos_filtrados['Prediccion']))
+                mae = np.mean(np.abs(datos_filtrados['generacion'] - datos_filtrados['Prediccion_Corregida']))
                 st.metric("MAE", f"{mae:.1f} kWh")
             
             with col2:
-                r2 = 1 - (np.sum((datos_filtrados['generacion'] - datos_filtrados['Prediccion'])**2) / 
+                r2 = 1 - (np.sum((datos_filtrados['generacion'] - datos_filtrados['Prediccion_Corregida'])**2) / 
                          np.sum((datos_filtrados['generacion'] - datos_filtrados['generacion'].mean())**2))
                 st.metric("R²", f"{r2:.4f}")
             
@@ -298,7 +307,7 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
                 st.metric("Max Real", f"{max_real:.0f} kWh")
             
             with col4:
-                max_pred = datos_filtrados['Prediccion'].max()
+                max_pred = datos_filtrados['Prediccion_Corregida'].max()
                 st.metric("Max Predicho", f"{max_pred:.0f} kWh")
             
             st.markdown("---")
@@ -319,7 +328,7 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
             
             fig1.add_trace(go.Scatter(
                 x=datos_filtrados['fecha_y_hora'],
-                y=datos_filtrados['Prediccion'],
+                y=datos_filtrados['Prediccion_Corregida'],
                 mode='lines',
                 name='Predicción',
                 line=dict(color='red', width=2, dash='dash'),
@@ -357,7 +366,7 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
             
             fig2.add_trace(go.Scatter(
                 x=datos_zoom['fecha_y_hora'],
-                y=datos_zoom['Prediccion'],
+                y=datos_zoom['Prediccion_Corregida'],
                 mode='lines',
                 name='Predicción',
                 line=dict(color='red', width=2, dash='dash'),
@@ -385,7 +394,7 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
                 
                 fig3.add_trace(go.Scatter(
                     x=datos_filtrados['generacion'],
-                    y=datos_filtrados['Prediccion'],
+                    y=datos_filtrados['Prediccion_Corregida'],
                     mode='markers',
                     marker=dict(
                         size=8,
@@ -399,7 +408,7 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
                 ))
                 
                 # Línea ideal
-                max_val = max(datos_filtrados['generacion'].max(), datos_filtrados['Prediccion'].max())
+                max_val = max(datos_filtrados['generacion'].max(), datos_filtrados['Prediccion_Corregida'].max())
                 fig3.add_trace(go.Scatter(
                     x=[0, max_val],
                     y=[0, max_val],
@@ -422,7 +431,7 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
                 st.markdown("### 📊 Gráfica 4: Patrón Diario Promedio")
                 
                 patron_real = datos_filtrados.groupby('hora')['generacion'].mean()
-                patron_pred = datos_filtrados.groupby('hora')['Prediccion'].mean()
+                patron_pred = datos_filtrados.groupby('hora')['Prediccion_Corregida'].mean()
                 patron_std = datos_filtrados.groupby('hora')['generacion'].std()
                 
                 fig4 = go.Figure()
@@ -482,7 +491,7 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
             # Tabla de datos
             with st.expander("📋 Ver Datos Detallados"):
                 st.dataframe(
-                    datos_filtrados[['fecha_y_hora', 'hora', 'generacion', 'Prediccion', 'Error']].head(100),
+                    datos_filtrados[['fecha_y_hora', 'hora', 'generacion', 'Prediccion_Corregida', 'Error']].head(100),
                     use_container_width=True
                 )
         
@@ -490,7 +499,7 @@ if modo == "📊 Datos Históricos (Real vs Predicho)":
             st.warning("⚠️ No hay datos en el rango seleccionado")
     
     else:
-        st.info("ℹ️ No hay resultados previos. Primero ejecuta 'modelo_final_corregido.py'")
+        st.info("ℹ️ No hay resultados previos. Primero ejecuta 'modelo_corregido_horas_sol.py'")
 
 # ===============================================================
 # MODO 2: PREDICCIONES FUTURAS
@@ -502,11 +511,14 @@ elif modo == "🔮 Predicciones Futuras":
     st.success("✅ **PREDICCIONES CORREGIDAS:** Respetan las horas de sol reales de España por mes")
     st.info("☀️ En enero: solo predice 8:30-18:00 | En junio: predice 7:00-21:30")
     
-    # Entrenar modelo
-    with st.spinner("🔄 Entrenando modelo..."):
-        model, feature_cols = entrenar_modelo_simple(df)
+    # Cargar modelo entrenado
+    with st.spinner("🔄 Cargando modelo entrenado..."):
+        model, feature_cols, scaler_info = cargar_modelo_entrenado()
     
-    st.success("✅ Modelo entrenado")
+    if model is None:
+        st.stop()
+    
+    st.success("✅ Modelo cargado correctamente")
     
     # Selector de días hacia adelante
     dias_adelante = st.slider(
@@ -519,7 +531,7 @@ elif modo == "🔮 Predicciones Futuras":
     
     # Generar predicciones
     with st.spinner(f"🔮 Generando predicciones para {dias_adelante} días..."):
-        df_futuro = predecir_futuro(model, feature_cols, df, dias_adelante)
+        df_futuro = predecir_futuro(model, feature_cols, df, scaler_info, dias_adelante)
     
     st.success(f"✅ Predicciones generadas para {dias_adelante} días")
     
@@ -641,7 +653,7 @@ elif modo == "📅 Día Específico":
                 st.metric("Total Real", f"{total_real:.0f} kWh")
             
             with col2:
-                total_pred = datos_dia['Prediccion'].sum()
+                total_pred = datos_dia['Prediccion_Corregida'].sum()
                 st.metric("Total Predicho", f"{total_pred:.0f} kWh")
             
             with col3:
@@ -671,7 +683,7 @@ elif modo == "📅 Día Específico":
             
             fig_dia.add_trace(go.Scatter(
                 x=datos_dia['fecha_y_hora'],
-                y=datos_dia['Prediccion'],
+                y=datos_dia['Prediccion_Corregida'],
                 mode='lines+markers',
                 name='Predicción',
                 line=dict(color='red', width=3, dash='dash'),
@@ -693,7 +705,7 @@ elif modo == "📅 Día Específico":
             # Tabla horaria
             st.markdown("### 📋 Datos Horarios")
             
-            tabla_dia = datos_dia[['fecha_y_hora', 'hora', 'generacion', 'Prediccion', 'Error']].copy()
+            tabla_dia = datos_dia[['fecha_y_hora', 'hora', 'generacion', 'Prediccion_Corregida', 'Error']].copy()
             tabla_dia.columns = ['Fecha y Hora', 'Hora', 'Real (kWh)', 'Predicción (kWh)', 'Error (kWh)']
             
             st.dataframe(tabla_dia, use_container_width=True)
@@ -702,7 +714,7 @@ elif modo == "📅 Día Específico":
             st.warning(f"⚠️ No hay datos para {fecha_seleccionada}")
     
     else:
-        st.info("ℹ️ No hay resultados previos. Primero ejecuta 'modelo_final_corregido.py'")
+        st.info("ℹ️ No hay resultados previos. Primero ejecuta 'modelo_corregido_horas_sol.py'")
 
 # Footer
 st.markdown("---")

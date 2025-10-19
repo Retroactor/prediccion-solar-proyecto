@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import pickle
 import warnings
 import sys
 warnings.filterwarnings('ignore')
@@ -157,6 +158,23 @@ model = GradientBoostingRegressor(
 
 model.fit(X_train, y_train)
 print("✅ Modelo entrenado")
+
+# ===============================================================
+# GUARDAR MODELO Y FEATURES
+# ===============================================================
+modelo_info = {
+    'model': model,
+    'feature_cols': feature_cols,
+    'scaler_info': {
+        'generacion_mean': df['generacion'].mean(),
+        'generacion_std': df['generacion'].std(),
+        'max_generacion': df['generacion'].max()
+    }
+}
+
+with open('modelo_solar_entrenado.pkl', 'wb') as f:
+    pickle.dump(modelo_info, f)
+print("💾 Modelo guardado en 'modelo_solar_entrenado.pkl'")
 
 # ===============================================================
 # PREDICCIONES CON CORRECCIÓN
