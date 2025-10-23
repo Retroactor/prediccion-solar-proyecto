@@ -11,6 +11,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+from scipy import stats
 import os
 import warnings
 warnings.filterwarnings('ignore')
@@ -199,6 +200,47 @@ with tab1:
             fig3.update_layout(title="Promedio por Hora", xaxis_title="Hora", yaxis_title="Generación (kWh)")
             st.plotly_chart(fig3, use_container_width=True)
             
+            # Gráfica 4: Energía generada por mes
+            st.subheader("📅 Energía Generada por Mes")
+            df_mes = df_filtrado.groupby(df_filtrado['fecha_y_hora'].dt.to_period('M')).agg({
+                'generacion': 'sum',
+                'Prediccion_Corregida': 'sum'
+            }).reset_index()
+            df_mes['fecha_y_hora'] = df_mes['fecha_y_hora'].astype(str)
+            
+            fig4 = go.Figure()
+            fig4.add_trace(go.Bar(x=df_mes['fecha_y_hora'], y=df_mes['generacion'], 
+                                name='Real', marker_color='lightblue'))
+            fig4.add_trace(go.Bar(x=df_mes['fecha_y_hora'], y=df_mes['Prediccion_Corregida'], 
+                                name='Predicción', marker_color='lightcoral'))
+            fig4.update_layout(title="Energía Total por Mes", xaxis_title="Mes", yaxis_title="Energía Total (kWh)")
+            st.plotly_chart(fig4, use_container_width=True)
+            
+            # Gráfica 5: Regresión lineal
+            st.subheader("📈 Regresión Lineal - Real vs Predicción")
+            fig5 = go.Figure()
+            fig5.add_trace(go.Scatter(x=df_filtrado['generacion'], y=df_filtrado['Prediccion_Corregida'], 
+                                    mode='markers', name='Datos', marker=dict(color='blue', opacity=0.6)))
+            
+            # Calcular regresión lineal
+            slope, intercept, r_value, p_value, std_err = stats.linregress(df_filtrado['generacion'], df_filtrado['Prediccion_Corregida'])
+            line = slope * df_filtrado['generacion'] + intercept
+            
+            fig5.add_trace(go.Scatter(x=df_filtrado['generacion'], y=line, 
+                                    mode='lines', name=f'Regresión (R²={r_value**2:.3f})', 
+                                    line=dict(color='red', width=2)))
+            
+            # Línea perfecta (y=x)
+            max_val = max(df_filtrado['generacion'].max(), df_filtrado['Prediccion_Corregida'].max())
+            fig5.add_trace(go.Scatter(x=[0, max_val], y=[0, max_val], 
+                                    mode='lines', name='Línea Perfecta', 
+                                    line=dict(color='green', width=2, dash='dash')))
+            
+            fig5.update_layout(title="Regresión Lineal: Real vs Predicción", 
+                             xaxis_title="Generación Real (kWh)", 
+                             yaxis_title="Predicción (kWh)")
+            st.plotly_chart(fig5, use_container_width=True)
+            
         else:
             st.warning("No hay datos para el período seleccionado")
     else:
@@ -211,17 +253,26 @@ with tab2:
     st.info("ℹ️ Las predicciones respetan las horas de sol reales de Panamá por mes")
     
     # Configuración de predicciones
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     with col1:
         fecha_inicio = st.date_input("Fecha de inicio de predicciones:", value=pd.Timestamp.now().date())
     with col2:
         dias_adelante = st.slider("Días hacia el futuro:", min_value=1, max_value=30, value=7)
+    with col3:
+        tipo_prediccion = st.selectbox("Tipo de predicción:", ["Estándar (1 hora)", "Granular (15 min)"])
     
     # Botón para generar predicciones
     if st.button("🔮 Generar Predicciones", type="primary"):
         try:
-            # Crear fechas futuras
-            fechas = pd.date_range(start=fecha_inicio, periods=dias_adelante * 24, freq='H')
+            # Crear fechas futuras según el tipo seleccionado
+            if tipo_prediccion == "Granular (15 min)":
+                # Intervalos de 15 minutos
+                fechas = pd.date_range(start=fecha_inicio, periods=dias_adelante * 96, freq='15min')
+                st.info(f"📊 Generando {dias_adelante} días con intervalos de 15 minutos ({dias_adelante * 96} períodos)")
+            else:
+                # Intervalos de 1 hora
+                fechas = pd.date_range(start=fecha_inicio, periods=dias_adelante * 24, freq='H')
+                st.info(f"📊 Generando {dias_adelante} días con intervalos de 1 hora ({dias_adelante * 24} períodos)")
             
             # Crear DataFrame para predicciones
             df_futuro = pd.DataFrame({
