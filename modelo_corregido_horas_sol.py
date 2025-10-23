@@ -13,6 +13,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import pickle
 import warnings
 import sys
+from modelo_solar_predictor import SolarPredictor
 warnings.filterwarnings('ignore')
 
 if sys.platform == 'win32':
@@ -25,22 +26,22 @@ print("🌅 MODELO CORREGIDO CON HORAS DE SOL REALES")
 print("=" * 80)
 
 # ===============================================================
-# HORAS DE SOL REALES EN ESPAÑA (Madrid)
+# HORAS DE SOL REALES EN PANAMÁ
 # ===============================================================
 
 HORAS_SOL_MADRID = {
-    1:  {'salida': 8.5, 'puesta': 18.0},   # Enero - ¡AQUÍ ESTÁ EL PROBLEMA!
-    2:  {'salida': 8.0, 'puesta': 18.5},   # Febrero
-    3:  {'salida': 7.0, 'puesta': 19.5},   # Marzo (cambio hora)
-    4:  {'salida': 7.5, 'puesta': 20.5},   # Abril
-    5:  {'salida': 7.0, 'puesta': 21.0},   # Mayo
-    6:  {'salida': 7.0, 'puesta': 21.5},   # Junio (días más largos)
-    7:  {'salida': 7.0, 'puesta': 21.5},   # Julio
-    8:  {'salida': 7.5, 'puesta': 21.0},   # Agosto
-    9:  {'salida': 8.0, 'puesta': 20.0},   # Septiembre
-    10: {'salida': 8.0, 'puesta': 19.5},   # Octubre (cambio hora)
-    11: {'salida': 8.0, 'puesta': 18.0},   # Noviembre
-    12: {'salida': 8.5, 'puesta': 18.0},   # Diciembre (días más cortos)
+    1:  {'salida': 6.5, 'puesta': 18.0},   # Enero - verano, días largos
+    2:  {'salida': 6.5, 'puesta': 18.0},   # Febrero - verano
+    3:  {'salida': 6.0, 'puesta': 18.0},   # Marzo - otoño
+    4:  {'salida': 6.0, 'puesta': 18.5},   # Abril
+    5:  {'salida': 6.0, 'puesta': 18.5},   # Mayo
+    6:  {'salida': 6.0, 'puesta': 18.5},   # Junio - invierno, días cortos
+    7:  {'salida': 6.0, 'puesta': 18.5},   # Julio - invierno
+    8:  {'salida': 6.0, 'puesta': 18.5},   # Agosto - invierno
+    9:  {'salida': 6.0, 'puesta': 18.0},   # Septiembre - primavera
+    10: {'salida': 6.0, 'puesta': 18.0},   # Octubre
+    11: {'salida': 6.0, 'puesta': 18.0},   # Noviembre
+    12: {'salida': 6.5, 'puesta': 18.0},   # Diciembre - verano, días largos
 }
 
 def hora_tiene_sol(hora, mes):

@@ -7,6 +7,7 @@
 
 import pandas as pd
 import numpy as np
+import math
 import pickle
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -44,20 +45,20 @@ class SolarPredictor:
         self.scaler_info = {}
         self.is_fitted = False
         
-        # Horas de sol por mes para Madrid, España
+        # Horas de sol por mes para Panamá (hemisferio sur)
         self.HORAS_SOL_MADRID = {
-            1: {'salida': 8.5, 'puesta': 18.0},
-            2: {'salida': 8.0, 'puesta': 18.5},
-            3: {'salida': 7.0, 'puesta': 19.5},
-            4: {'salida': 7.5, 'puesta': 20.5},
-            5: {'salida': 7.0, 'puesta': 21.0},
-            6: {'salida': 7.0, 'puesta': 21.5},
-            7: {'salida': 7.0, 'puesta': 21.5},
-            8: {'salida': 7.5, 'puesta': 21.0},
-            9: {'salida': 8.0, 'puesta': 20.0},
-            10: {'salida': 8.0, 'puesta': 19.5},
-            11: {'salida': 8.0, 'puesta': 18.0},
-            12: {'salida': 8.5, 'puesta': 18.0}
+            1: {'salida': 6.5, 'puesta': 18.0},   # Enero - verano, días largos
+            2: {'salida': 6.5, 'puesta': 18.0},   # Febrero - verano
+            3: {'salida': 6.0, 'puesta': 18.0},   # Marzo - otoño
+            4: {'salida': 6.0, 'puesta': 18.5},   # Abril
+            5: {'salida': 6.0, 'puesta': 18.5},   # Mayo
+            6: {'salida': 6.0, 'puesta': 18.5},   # Junio - invierno, días cortos
+            7: {'salida': 6.0, 'puesta': 18.5},   # Julio - invierno
+            8: {'salida': 6.0, 'puesta': 18.5},   # Agosto - invierno
+            9: {'salida': 6.0, 'puesta': 18.0},   # Septiembre - primavera
+            10: {'salida': 6.0, 'puesta': 18.0},  # Octubre
+            11: {'salida': 6.0, 'puesta': 18.0},  # Noviembre
+            12: {'salida': 6.5, 'puesta': 18.0}   # Diciembre - verano, días largos
         }
     
     def _hora_tiene_sol(self, hora, mes):
@@ -96,13 +97,20 @@ class SolarPredictor:
         df['año'] = df['fecha_y_hora'].dt.year
         df['dia_mes'] = df['fecha_y_hora'].dt.day  # Agregar día del mes para variabilidad
         
-        # Features cíclicas
+        # Features cíclicas mejoradas para granularidad de 15 minutos
         df['hora_sin'] = np.sin(2 * np.pi * df['hora'] / 24)
         df['hora_cos'] = np.cos(2 * np.pi * df['hora'] / 24)
+        df['minuto_sin'] = np.sin(2 * np.pi * df['minuto'] / 60)  # Ciclicidad por minuto
+        df['minuto_cos'] = np.cos(2 * np.pi * df['minuto'] / 60)
+        df['periodo_15min'] = (df['hora'] * 4) + (df['minuto'] // 15)  # Período de 15 min (0-95)
+        df['periodo_15min_sin'] = np.sin(2 * np.pi * df['periodo_15min'] / 96)  # 96 períodos de 15 min por día
+        df['periodo_15min_cos'] = np.cos(2 * np.pi * df['periodo_15min'] / 96)
         df['dia_semana_sin'] = np.sin(2 * np.pi * df['dia_semana'] / 7)
         df['dia_semana_cos'] = np.cos(2 * np.pi * df['dia_semana'] / 7)
         df['mes_sin'] = np.sin(2 * np.pi * df['mes'] / 12)
         df['mes_cos'] = np.cos(2 * np.pi * df['mes'] / 12)
+        df['dia_año_sin'] = np.sin(2 * np.pi * df['dia_año'] / 365)  # Estacionalidad anual
+        df['dia_año_cos'] = np.cos(2 * np.pi * df['dia_año'] / 365)
         
         # Features solares
         df['es_dia_solar'] = df['hora'].between(6, 18).astype(int)
@@ -130,7 +138,7 @@ class SolarPredictor:
         Args:
             X (pd.DataFrame): DataFrame con columnas 'fecha_y_hora' y 'generacion'
         """
-        print("🔄 Preparando datos para entrenamiento...")
+        print("Preparando datos para entrenamiento...")
         
         # Preparar features
         df = self._preparar_features(X.copy())
@@ -159,7 +167,7 @@ class SolarPredictor:
         df_clean = df.dropna()
         
         if len(df_clean) < 100:
-            raise ValueError("❌ No hay suficientes datos para entrenar el modelo")
+            raise ValueError("No hay suficientes datos para entrenar el modelo")
         
         # Separar features y target
         X_train = df_clean[self.feature_cols].values
@@ -174,12 +182,22 @@ class SolarPredictor:
         }
         
         # Guardar patrones históricos por hora para predicciones futuras
-        self.patrones_hora = df_clean.groupby('hora')['generacion'].agg(['mean', 'max', 'std']).to_dict()
-        self.patrones_hora_mes = df_clean.groupby(['hora', 'mes'])['generacion'].agg(['mean', 'max']).to_dict()
+        patrones_hora_df = df_clean.groupby('hora')['generacion'].agg(['mean', 'max', 'std'])
+        self.patrones_hora = {
+            'mean': patrones_hora_df['mean'].to_dict(),
+            'max': patrones_hora_df['max'].to_dict(),
+            'std': patrones_hora_df['std'].to_dict()
+        }
         
-        print(f"📊 Patrones históricos guardados: {len(self.patrones_hora['mean'])} horas")
+        patrones_hora_mes_df = df_clean.groupby(['hora', 'mes'])['generacion'].agg(['mean', 'max'])
+        self.patrones_hora_mes = {
+            'mean': patrones_hora_mes_df['mean'].to_dict(),
+            'max': patrones_hora_mes_df['max'].to_dict()
+        }
         
-        print("🚀 Entrenando modelo GradientBoostingRegressor...")
+        print(f"Patrones historicos guardados: {len(self.patrones_hora['mean'])} horas")
+        
+        print("Entrenando modelo GradientBoostingRegressor...")
         
         # Crear y entrenar modelo
         self.model = GradientBoostingRegressor(**self.model_params)
@@ -187,9 +205,9 @@ class SolarPredictor:
         
         self.is_fitted = True
         
-        print("✅ Modelo entrenado exitosamente")
-        print(f"📊 Features utilizadas: {len(self.feature_cols)}")
-        print(f"📈 Datos de entrenamiento: {len(df_clean)} registros")
+        print("Modelo entrenado exitosamente")
+        print(f"Features utilizadas: {len(self.feature_cols)}")
+        print(f"Datos de entrenamiento: {len(df_clean)} registros")
         
         return self
     
@@ -204,9 +222,9 @@ class SolarPredictor:
             np.array: Predicciones
         """
         if not self.is_fitted:
-            raise ValueError("❌ El modelo no ha sido entrenado. Llama a fit() primero.")
+            raise ValueError("El modelo no ha sido entrenado. Llama a fit() primero.")
         
-        print("🔮 Generando predicciones...")
+        print("Generando predicciones...")
         
         # Preparar features
         df = self._preparar_features(X.copy())
@@ -325,16 +343,17 @@ class SolarPredictor:
                         dia_semana = df.iloc[i]['dia_semana'] if 'dia_semana' in df.columns else 0
                         
                         # Factor de variación diaria (0.8 a 1.2)
-                        import math
                         factor_diario = 0.9 + 0.2 * math.sin(2 * math.pi * dia_año / 365)
                         
                         # Factor de variación semanal (menos generación los fines de semana)
                         factor_semanal = 0.95 if dia_semana in [5, 6] else 1.0
                         
                         # Factor de variación aleatoria suave (0.85 a 1.15)
-                        # Usar el día específico como semilla para variabilidad entre días
+                        # Usar el período específico (hora + minuto) para variabilidad granular
                         dia_especifico = df.iloc[i]['fecha_y_hora'].day
-                        np.random.seed((dia_año * 1000 + hora * 100 + dia_especifico) % 2**32)
+                        minuto_especifico = df.iloc[i]['fecha_y_hora'].minute
+                        # Semilla más granular incluyendo minuto
+                        np.random.seed((dia_año * 10000 + hora * 1000 + minuto_especifico * 10 + dia_especifico) % 2**32)
                         factor_aleatorio = 0.85 + 0.3 * np.random.random()
                         
                         # Aplicar todos los factores
@@ -350,14 +369,16 @@ class SolarPredictor:
                         dia_año = df.iloc[i]['dia_año'] if 'dia_año' in df.columns else 1
                         factor_diario = 0.95 + 0.1 * math.sin(2 * math.pi * dia_año / 365)
                         dia_especifico = df.iloc[i]['fecha_y_hora'].day
-                        np.random.seed((dia_año * 1000 + hora * 100 + dia_especifico) % 2**32)
+                        minuto_especifico = df.iloc[i]['fecha_y_hora'].minute
+                        # Semilla más granular incluyendo minuto
+                        np.random.seed((dia_año * 10000 + hora * 1000 + minuto_especifico * 10 + dia_especifico) % 2**32)
                         factor_aleatorio = 0.9 + 0.2 * np.random.random()
                         
                         pred = pred * factor_ajuste * 0.5 * factor_diario * factor_aleatorio
             
             predictions_corregidas.append(pred)
         
-        print(f"✅ Predicciones generadas: {len(predictions_corregidas)} valores")
+        print(f"Predicciones generadas: {len(predictions_corregidas)} valores")
         
         return np.array(predictions_corregidas)
     
@@ -369,7 +390,7 @@ class SolarPredictor:
             filepath (str): Ruta donde guardar el modelo
         """
         if not self.is_fitted:
-            raise ValueError("❌ El modelo no ha sido entrenado. No hay nada que guardar.")
+            raise ValueError("El modelo no ha sido entrenado. No hay nada que guardar.")
         
         model_data = {
             'model': self.model,
@@ -385,7 +406,7 @@ class SolarPredictor:
         with open(filepath, 'wb') as f:
             pickle.dump(model_data, f)
         
-        print(f"💾 Modelo guardado en: {filepath}")
+        print(f"Modelo guardado en: {filepath}")
     
     def load(self, filepath):
         """
@@ -401,25 +422,27 @@ class SolarPredictor:
             self.model = model_data['model']
             self.feature_cols = model_data['feature_cols']
             self.scaler_info = model_data['scaler_info']
-            self.model_params = model_data['model_params']
-            self.is_fitted = model_data['is_fitted']
-            self.HORAS_SOL_MADRID = model_data['HORAS_SOL_MADRID']
+            
+            # Manejar compatibilidad con modelos antiguos
+            self.model_params = model_data.get('model_params', self.default_params)
+            self.is_fitted = model_data.get('is_fitted', True)
+            self.HORAS_SOL_MADRID = model_data.get('HORAS_SOL_MADRID', self.HORAS_SOL_MADRID)
             self.patrones_hora = model_data.get('patrones_hora', {})
             self.patrones_hora_mes = model_data.get('patrones_hora_mes', {})
             
-            print(f"✅ Modelo cargado desde: {filepath}")
-            print(f"📊 Features: {len(self.feature_cols)}")
-            print(f"🔧 Parámetros: {self.model_params}")
+            print(f"Modelo cargado desde: {filepath}")
+            print(f"Features: {len(self.feature_cols)}")
+            print(f"Parametros: {self.model_params}")
             
         except FileNotFoundError:
-            raise FileNotFoundError(f"❌ No se encontró el archivo: {filepath}")
+            raise FileNotFoundError(f"No se encontro el archivo: {filepath}")
         except Exception as e:
-            raise Exception(f"❌ Error al cargar el modelo: {str(e)}")
+            raise Exception(f"Error al cargar el modelo: {str(e)}")
     
     def get_feature_importance(self):
         """Obtener importancia de las features"""
         if not self.is_fitted:
-            raise ValueError("❌ El modelo no ha sido entrenado.")
+            raise ValueError("El modelo no ha sido entrenado.")
         
         importance = self.model.feature_importances_
         feature_importance = list(zip(self.feature_cols, importance))
@@ -439,7 +462,7 @@ class SolarPredictor:
             dict: Métricas de evaluación
         """
         if not self.is_fitted:
-            raise ValueError("❌ El modelo no ha sido entrenado.")
+            raise ValueError("El modelo no ha sido entrenado.")
         
         predictions = self.predict(X_test)
         

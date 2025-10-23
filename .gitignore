@@ -54,6 +54,20 @@ Thumbs.db
 Datos reales.xlsx
 RESULTADOS_CORREGIDOS_SOL.xlsx
 
+# Archivos Excel de predicciones (no subir a Git)
+predicciones_*.xlsx
+predicciones_finales_dashboard.xlsx
+predicciones_granulares_15min.xlsx
+predicciones_finales_dashboard_analysis.txt
+
+# Modelos entrenados (no subir a Git)
+modelo_solar_entrenado.pkl
+models/solar_predictor_model.pkl
+
+# Scripts temporales
+predicciones_granulares.py
+verificar_variabilidad_final.py
+
 # Archivos intermedios de entrenamiento
 modelo_final_corregido.py
 modelo_ajustado_timezone.py
